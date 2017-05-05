@@ -11,7 +11,7 @@ import gevent
 import gevent.monkey
 from gevent.queue import Queue, PriorityQueue
 
-from irods.exception import CAT_INVALID_AUTHENTICATION
+from irods.exception import CAT_INVALID_AUTHENTICATION, DataObjectDoesNotExist
 from irods.session import iRODSSession
 
 gevent.monkey.patch_all()
@@ -73,16 +73,17 @@ class irodsReader(gevent.Greenlet):
             self.results.put((work_id, self.buffer[:read_s]))
         logger.debug("{} finished work".format(self))
 
-
-@click.command()
-@click.argument('do_path')
+@click.group()
 @click.option('--host', default=None, help="irods host")
 @click.option('--port', default=None, type=click.INT, help="irods port")
 @click.option('--user', default=None, help="irods user")
 @click.option('--zone', default=None, help="irods zone")
 @click.option('--verbose', is_flag=True, help="verbose output to queue.log")
-@click.option('--progress', is_flag=True, help="show work unit progress")
-def download(do_path, host, port, user, zone, verbose, progress):
+@click.option('--progress', default=False, is_flag=True, help="show work unit progress")
+@click.pass_context
+def cli(ctx, host, port, user, zone, verbose, progress):
+    ctx.obj['progress'] = progress
+    ctx.obj['verbose'] = verbose
     if verbose:
         logging.basicConfig(stream=sys.stderr, level=logging.DEBUG)
     if host is None:
@@ -97,15 +98,9 @@ def download(do_path, host, port, user, zone, verbose, progress):
     if password is None:
         password = getpass()
 
-    filename = os.path.basename(do_path)
-    if os.path.isfile(os.path.join('./', filename)):
-        click.echo("File already exists locally: {}".format(filename))
-        exit(-1)
-
     try:
-        sess = iRODSSession(host=host, port=port, user=user,
-                            zone=zone, password=password)
-        data_object = sess.data_objects.get(do_path)
+        ctx.obj['session'] = iRODSSession(host=host, port=port, user=user,
+                                          zone=zone, password=password)
     except CAT_INVALID_AUTHENTICATION:
         click.echo('Authentication failed. Use --verbose to debug.')
         if verbose:
@@ -116,6 +111,23 @@ def download(do_path, host, port, user, zone, verbose, progress):
         if verbose:
             raise
         exit(-1)
+
+@cli.command()
+@click.argument('data_object_path')
+@click.pass_context
+def get(ctx, data_object_path):
+    filename = os.path.basename(data_object_path)
+    if os.path.isfile(os.path.join('./', filename)):
+        click.echo("File already exists locally: {}".format(filename))
+        exit(-1)
+    try:
+        data_object = ctx.obj['session'].data_objects.get(data_object_path)
+    except DataObjectDoesNotExist:
+        click.echo('No such remote data object. Use --verbose to debug.')
+        if ctx.obj['verbose']:
+            raise
+        exit(-1)
+
 
     click.echo('Starting download of {} ({} bytes)'.format(filename,
                                                            data_object.size))
@@ -152,8 +164,7 @@ def download(do_path, host, port, user, zone, verbose, progress):
     gevent.joinall(readers + [writer])
     click.echo("Wrote {}".format(filename))
 
-
 if __name__ == '__main__':
     dotenv_path = os.path.join(os.path.dirname(__file__), '.env')
     load_dotenv(dotenv_path)
-    download()
+    cli(obj={})
