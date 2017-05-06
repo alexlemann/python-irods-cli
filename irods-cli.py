@@ -1,4 +1,5 @@
 #!/usr/bin/env python
+from collections import deque
 from getpass import getpass
 import logging
 import os
@@ -6,12 +7,16 @@ import sys
 
 import click
 from dotenv import load_dotenv
+import humanize
 
 import gevent
 import gevent.monkey
 from gevent.queue import Queue, PriorityQueue
 
-from irods.exception import CAT_INVALID_AUTHENTICATION, DataObjectDoesNotExist
+from irods.exception import CAT_INVALID_AUTHENTICATION, CollectionDoesNotExist, DataObjectDoesNotExist
+from irods.collection import iRODSCollection
+from irods.data_object import iRODSDataObject
+from irods.models import DataObject
 from irods.session import iRODSSession
 
 gevent.monkey.patch_all()
@@ -112,12 +117,54 @@ def cli(ctx, host, port, user, zone, verbose, progress):
             raise
         exit(-1)
 
+
+def find_children(node):
+    if type(node) == iRODSDataObject:
+        return set()
+    else:
+        subcollections = set([col for col in node.subcollections])
+        return subcollections.union(set([do for do in node.data_objects]))
+
+@cli.command()
+@click.argument('path')
+@click.option('--recursive', is_flag=True, help='use a long listing format')
+@click.option('--human-readable','-h', is_flag=True, help='with -l and/or -s, print human readable sizes (e.g., 1K 234M 2G)')
+@click.option('--size','-s', is_flag=True, help='print the allocated size of each file, in blocks')
+@click.option('-l', is_flag=True, help='use a long listing format')
+@click.pass_context
+def ls(ctx, path, recursive, **print_kwargs):
+    obj = None
+    try:
+        obj =  ctx.obj['session'].data_objects.get(path)
+        print(stringify(obj, ctx.obj['session'], **print_kwargs))
+        return
+    except DataObjectDoesNotExist:
+        pass
+    try:
+        obj = ctx.obj['session'].collections.get(path)
+    except CollectionDoesNotExist:
+        if not obj:
+            click.echo('Not found in remote path. Use --verbose to debug.')
+            click.echo(path)
+            if ctx.obj['verbose']:
+                raise
+            exit(-1)
+
+    children = deque(find_children(obj).union(set([obj])))
+    while children:
+        c = children.pop()
+        print(stringify(c, ctx.obj['session'], **print_kwargs))
+        if type(c) == iRODSCollection and recursive:
+            for child in find_children(c):
+                if child:
+                    children.append(child)
+
 @cli.command()
 @click.argument('data_object_path')
 @click.pass_context
 def get(ctx, data_object_path):
     filename = os.path.basename(data_object_path)
-    if os.path.isfile(os.path.join('./', filename)):
+    if os.path.isfile(os.path.join(os.path.abspath(os.curdir), filename)):
         click.echo("File already exists locally: {}".format(filename))
         exit(-1)
     try:
@@ -127,7 +174,6 @@ def get(ctx, data_object_path):
         if ctx.obj['verbose']:
             raise
         exit(-1)
-
 
     click.echo('Starting download of {} ({} bytes)'.format(filename,
                                                            data_object.size))
@@ -164,7 +210,35 @@ def get(ctx, data_object_path):
     gevent.joinall(readers + [writer])
     click.echo("Wrote {}".format(filename))
 
+def stringify(obj, session, human_readable, size, l):
+    if type(obj) == iRODSCollection:
+        return obj.path + '/'
+    elif type(obj) == iRODSDataObject:
+        if human_readable:
+            size = humanize.naturalsize(obj.size, gnu=True)
+        else:
+            size = obj.size
+        if l:
+            results = session.query(
+                                    DataObject.owner_name,
+                                    DataObject.modify_time,
+                                 ).filter(
+                                    DataObject.id == obj.id
+                                 ).first()
+            return '{} {} {} {}'.format(results[DataObject.owner_name],
+                                     size,
+                                     results[DataObject.modify_time],
+                                     obj.path)
+        if size:
+            return '{} {}'.format(size, obj.path)
+        return obj.path
+    elif obj is None:
+        return ''
+    else:
+        logger.debug(type(obj))
+        raise ValueError
+
 if __name__ == '__main__':
-    dotenv_path = os.path.join(os.path.dirname(__file__), '.env')
+    dotenv_path = os.path.join(os.path.abspath(os.curdir), '.env')
     load_dotenv(dotenv_path)
     cli(obj={})
