@@ -22,7 +22,8 @@ from irods.session import iRODSSession
 gevent.monkey.patch_all()
 
 # buffer in multiples of 1 MiB
-BUFFER_SIZE = int(round((2**20) * .25))
+BUFFER_SIZE_MB = .25
+BUFFER_SIZE = int(round((2**20) * BUFFER_SIZE_MB))
 THREADS = 30
 WRITE_WORKER_SLEEP = .25
 UPDATE_LOOP_SLEEP = 5
@@ -117,6 +118,12 @@ def cli(ctx, host, port, user, zone, verbose, progress):
             raise
         exit(-1)
 
+@cli.command()
+@click.argument('path')
+#TODO @click.option('-p', is_flag=True, help='no error if existing, make parent directories as needed')
+@click.pass_context
+def mkdir(ctx, path):
+    ctx.obj['session'].collections.create(path)
 
 def find_children(node):
     if type(node) == iRODSDataObject:
@@ -136,7 +143,7 @@ def ls(ctx, path, recursive, **print_kwargs):
     obj = None
     try:
         obj =  ctx.obj['session'].data_objects.get(path)
-        print(stringify(obj, ctx.obj['session'], **print_kwargs))
+        click.echo(stringify(obj, ctx.obj['session'], **print_kwargs))
         return
     except DataObjectDoesNotExist:
         pass
@@ -150,10 +157,11 @@ def ls(ctx, path, recursive, **print_kwargs):
                 raise
             exit(-1)
 
-    children = deque(find_children(obj).union(set([obj])))
+    children = deque([obj])
+    [children.append(c) for c in find_children(obj)]
     while children:
         c = children.pop()
-        print(stringify(c, ctx.obj['session'], **print_kwargs))
+        click.echo(stringify(c, ctx.obj['session'], **print_kwargs))
         if type(c) == iRODSCollection and recursive:
             for child in find_children(c):
                 if child:
@@ -222,7 +230,7 @@ def stringify(obj, session, human_readable, size, l):
             results = session.query(
                                     DataObject.owner_name,
                                     DataObject.modify_time,
-                                 ).filter(
+                                    ).filter(
                                     DataObject.id == obj.id
                                  ).first()
             return '{} {} {} {}'.format(results[DataObject.owner_name],
