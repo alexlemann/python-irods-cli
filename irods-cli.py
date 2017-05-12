@@ -4,6 +4,7 @@ from getpass import getpass
 import logging
 import os
 import sys
+import shutil
 
 import click
 from dotenv import load_dotenv
@@ -134,7 +135,7 @@ def find_children(node):
 
 @cli.command()
 @click.argument('path')
-@click.option('--recursive', is_flag=True, help='use a long listing format')
+@click.option('--recursive','-R', is_flag=True, help='use a long listing format')
 @click.option('--human-readable','-h', is_flag=True, help='with -l and/or -s, print human readable sizes (e.g., 1K 234M 2G)')
 @click.option('--size','-s', is_flag=True, help='print the allocated size of each file, in blocks')
 @click.option('-l', is_flag=True, help='use a long listing format')
@@ -166,6 +167,18 @@ def ls(ctx, path, recursive, **print_kwargs):
             for child in find_children(c):
                 if child:
                     children.append(child)
+
+@cli.command()
+@click.argument('local_path')
+@click.argument('remote_collection_path')
+@click.pass_context
+def put(ctx, local_path, remote_collection_path):
+    filename = os.path.basename(local_path)
+    data_object_path = remote_collection_path + '/' + filename
+    data_object = ctx.obj['session'].data_objects.create(data_object_path)
+
+    with data_object.open('w') as remote, open(local_path, 'r') as local:
+        shutil.copyfileobj(local, remote)
 
 @cli.command()
 @click.argument('data_object_path')
