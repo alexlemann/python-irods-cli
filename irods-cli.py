@@ -104,10 +104,8 @@ def cli(ctx, host, port, user, zone, verbose, progress):
     password = os.getenv('IRODS_PASSWORD', None)
     if password is None:
         password = getpass()
-
     try:
-        ctx.obj['session'] = iRODSSession(host=host, port=port, user=user,
-                                          zone=zone, password=password)
+        ctx.obj['session'] = iRODSSession(host=host, port=port, user=user, zone=zone, password=password)
     except CAT_INVALID_AUTHENTICATION:
         click.echo('Authentication failed. Use --verbose to debug.')
         if verbose:
@@ -134,6 +132,31 @@ def find_children(node):
         return subcollections.union(set([do for do in node.data_objects]))
 
 @cli.command()
+@click.argument('source_path')
+@click.argument('destination_collection_path')
+#@click.option('--recursive','-R', is_flag=True, help='use a long listing format')
+def cp(ctx, source_data_object, destination_path):
+    ctx.obj['session'].data_objects.copy(source_data_object, destination_path)
+
+@cli.command()
+@click.argument('source_path')
+@click.argument('destination_collection_path')
+def mv(ctx, source_path, parent_collection_path):
+    pass
+
+@cli.command()
+@click.argument('path')
+#@click.option('--recursive','-R', is_flag=True, help='use a long listing format')
+#@click.option('--force','-f', is_flag=True, help='force the operation')
+def rm(ctx, path):
+    pass
+
+@cli.command()
+@click.argument('collection_path')
+def rmcol(ctx, collection_path):
+    pass
+
+@cli.command()
 @click.argument('path')
 @click.option('--recursive','-R', is_flag=True, help='use a long listing format')
 @click.option('--human-readable','-h', is_flag=True, help='with -l and/or -s, print human readable sizes (e.g., 1K 234M 2G)')
@@ -149,7 +172,8 @@ def ls(ctx, path, recursive, **print_kwargs):
     except DataObjectDoesNotExist:
         pass
     try:
-        obj = ctx.obj['session'].collections.get(path)
+        if not obj:
+            obj = ctx.obj['session'].collections.get(path)
     except CollectionDoesNotExist:
         if not obj:
             click.echo('Not found in remote path. Use --verbose to debug.')
@@ -224,10 +248,7 @@ def get(ctx, data_object_path):
         gevent.sleep(UPDATE_LOOP_SLEEP)
         if progress:
             percent_remaining = round(float(len(tasks))/t_size*100)
-            click.echo('Remaining: tq:{} {}% wq:{}'.format(len(tasks),
-                                                           percent_remaining,
-                                                           len(results)))
-
+            click.echo('Remaining: tq:{} {}% wq:{}'.format(len(tasks), percent_remaining, len(results))) 
     gevent.joinall(readers + [writer])
     click.echo("Wrote {}".format(filename))
 
@@ -240,16 +261,12 @@ def stringify(obj, session, human_readable, size, l):
         else:
             size = obj.size
         if l:
-            results = session.query(
-                                    DataObject.owner_name,
+            results = session.query(DataObject.owner_name,
                                     DataObject.modify_time,
                                     ).filter(
-                                    DataObject.id == obj.id
-                                 ).first()
-            return '{} {} {} {}'.format(results[DataObject.owner_name],
-                                     size,
-                                     results[DataObject.modify_time],
-                                     obj.path)
+                                             DataObject.id == obj.id
+                                    ).first()
+            return '{} {} {} {}'.format(results[DataObject.owner_name], size, results[DataObject.modify_time], obj.path)
         if size:
             return '{} {}'.format(size, obj.path)
         return obj.path
