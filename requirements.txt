@@ -1,5 +1,5 @@
 click==6.7
 gevent==1.2.1
 python-dotenv==0.6.3
-git+git://github.com/irods/python-irodsclient.git@v0.5.0#python-irodsclient
+git+git://github.com/irods/python-irodsclient.git@v0.6.0#python-irodsclient
 humanize==0.5.1
