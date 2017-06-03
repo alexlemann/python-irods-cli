@@ -68,7 +68,8 @@ class irodsReader(gevent.Greenlet):
 
 @cli.command()
 @click.argument('data_object_path')
-@click.option('--verbose', is_flag=True, help="Show download progress updates.")
+@click.option('--progress', is_flag=True,
+              help="Show download progress updates.")
 @click.pass_context
 def get(ctx, data_object_path, progress=True):
     filename = os.path.basename(data_object_path)
