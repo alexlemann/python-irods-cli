@@ -1,0 +1,5 @@
+*pyc
+.*swp
+.env
+python_irods_cli.egg-info/
+.ropeproject
